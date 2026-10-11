@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function udoc(u) { return get(/databases/$(database)/documents/users/$(u)).data; }
+    // Both people must have added each other's ID before anything is visible.
+    function paired(owner) {
+      return signedIn() && owner != request.auth.uid
+        && udoc(owner).partner == request.auth.uid
+        && udoc(request.auth.uid).partner == owner;
+    }
+
+    match /users/{u} {
+      allow read: if signedIn() && (u == request.auth.uid || paired(u));
+      allow create, update: if signedIn() && u == request.auth.uid;
+    }
+
+    match /locations/{u} {
+      allow write: if signedIn() && u == request.auth.uid;
+      allow read: if signedIn() && (u == request.auth.uid
+        || (paired(u) && udoc(u).share_location != false));
+    }
+
+    match /calls/{id} {
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.owner == request.auth.uid;
+      allow read: if signedIn() && (resource.data.owner == request.auth.uid
+        || (paired(resource.data.owner) && udoc(resource.data.owner).share_calls != false));
+    }
+
+    match /messages/{id} {
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.owner == request.auth.uid;
+      allow read: if signedIn() && (resource.data.owner == request.auth.uid
+        || (paired(resource.data.owner) && udoc(resource.data.owner).share_messages != false));
+    }
+
+    match /events/{id} {
+      allow create: if signedIn() && request.resource.data.from == request.auth.uid
+        && paired(request.resource.data.to)
+        && request.resource.data.kind in ['miss_you', 'sos'];
+      allow read: if signedIn() && (resource.data.from == request.auth.uid
+        || resource.data.to == request.auth.uid);
+    }
+  }
+}
